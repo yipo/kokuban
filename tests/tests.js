@@ -1,8 +1,9 @@
 import { BOARD_SIZE, SIZES } from '../js/config.js';
-import { toBoard, zoomAt, constrain } from '../js/viewport.js';
+import { toBoard, zoomAt, constrain, touchPair, pinchCamera } from '../js/viewport.js';
 import { Drawing, paintStroke, toPNG } from '../js/drawing.js';
 import { TextLayer } from '../js/text.js';
 import { Autosave, openDatabase, readBoard, writeBoard } from '../js/storage.js';
+import { TouchInput } from '../js/touch.js';
 
 const results = [];
 const assert = (condition, message = 'Assertion failed') => { if (!condition) throw new Error(message); };
@@ -170,6 +171,144 @@ await test('Save failures remain dirty and can retry', async () => {
   fail = false;
   await saver.flush();
   assert(state === 'saved' && !saver.pending);
+});
+
+await test('Pinch combines midpoint movement and scale while preserving its board anchor', () => {
+  const camera = { x: -200, y: -50, scale: .5 };
+  const start = touchPair([{ x: 100, y: 200 }, { x: 300, y: 200 }]);
+  const current = touchPair([{ x: 80, y: 250 }, { x: 480, y: 250 }]);
+  const result = pinchCamera(camera, start, current, .25);
+  near(result.scale, 1);
+  const before = toBoard(start.center, camera);
+  const after = toBoard(current.center, result);
+  near(before.x, after.x); near(before.y, after.y);
+  near(pinchCamera(camera, start, { ...current, distance: 100000 }, .25).scale, 8);
+  near(pinchCamera(camera, start, { ...current, distance: 0 }, .25).scale, .25);
+});
+
+await test('Canceling drawing or erasing restores the bitmap and excludes provisional pixels from saves', async () => {
+  const surface = canvas();
+  paintStroke(surface.getContext('2d'), [{ x: 50, y: 50 }], 12);
+  const drawing = new Drawing(surface);
+  drawing.begin({ x: 100, y: 100 }, 12, false);
+  const restored = canvas();
+  await new Drawing(restored).restore(await drawing.snapshot());
+  assert(pixel(restored, 50, 50)[3] === 255);
+  assert(pixel(restored, 100, 100)[3] === 0);
+  drawing.cancel();
+  assert(pixel(surface, 100, 100)[3] === 0);
+  drawing.begin({ x: 50, y: 50 }, 32, true);
+  assert(pixel(surface, 50, 50)[3] === 0);
+  drawing.cancel();
+  assert(pixel(surface, 50, 50)[3] === 255);
+  assert(!drawing.stroke && !drawing.frame);
+});
+
+function touchFixture(tool = 'pencil') {
+  const element = document.createElement('div');
+  const layer = document.createElement('div');
+  document.querySelector('#fixture').append(element);
+  element.append(layer);
+  const captured = new Set();
+  // Synthetic PointerEvents cannot obtain native capture; model capture for these state tests.
+  element.setPointerCapture = id => captured.add(id);
+  element.hasPointerCapture = id => captured.has(id);
+  element.releasePointerCapture = id => captured.delete(id);
+  const viewport = {
+    element, camera: { x: 0, y: 0, scale: 1 },
+    point: event => ({ x: event.clientX, y: event.clientY }),
+    boardPoint(event) { return toBoard(this.point(event), this.camera); },
+    contains: point => point.x >= 0 && point.y >= 0 && point.x < BOARD_SIZE && point.y < BOARD_SIZE,
+    minimumScale: () => .25, render() {},
+  };
+  const drawing = new Drawing(canvas());
+  const text = new TextLayer(layer, viewport, () => {}, () => {});
+  let changes = 0;
+  const input = new TouchInput(element, viewport, drawing, text, {
+    available: () => true, tool: () => ({ tool, size: tool === 'text' ? 48 : 12 }), changed: () => changes++,
+  });
+  const send = (type, id, x = 100, y = 100, target = element) => target.dispatchEvent(new PointerEvent(type, {
+    pointerType: 'touch', pointerId: id, clientX: x, clientY: y, bubbles: true, cancelable: true,
+  }));
+  return { input, viewport, drawing, text, send, changes: () => changes, cleanup: () => { input.cancel(); element.remove(); } };
+}
+
+await test('Second finger rolls back the stroke; one remaining finger cannot resume drawing', () => {
+  const f = touchFixture();
+  try {
+    f.send('pointerdown', 1, 100, 100);
+    assert(pixel(f.drawing.canvas, 100, 100)[3] === 255);
+    f.send('pointerdown', 2, 200, 100);
+    assert(pixel(f.drawing.canvas, 100, 100)[3] === 0);
+    f.send('pointermove', 2, 300, 100);
+    near(f.viewport.camera.scale, 2);
+    f.send('pointerup', 2, 300, 100);
+    const camera = JSON.stringify(f.viewport.camera);
+    f.send('pointermove', 1, 120, 100);
+    assert(JSON.stringify(f.viewport.camera) === camera && !f.drawing.stroke);
+    f.send('pointerup', 1, 120, 100);
+    assert(!f.input.active && f.changes() === 0);
+    f.send('pointerdown', 3, 150, 150);
+    f.send('pointerup', 3, 150, 150);
+    assert(f.changes() === 1 && !f.drawing.stroke);
+  } finally { f.cleanup(); }
+});
+
+await test('Third-finger changes, pointer cancellation, and capture loss leave no stuck gesture', () => {
+  const f = touchFixture();
+  try {
+    f.send('pointerdown', 1, 100, 100);
+    f.send('pointerdown', 2, 200, 100);
+    f.send('pointerdown', 3, 300, 100);
+    f.send('pointercancel', 1, 100, 100);
+    f.send('pointermove', 3, 350, 100);
+    assert(Number.isFinite(f.viewport.camera.scale));
+    f.send('pointerup', 2, 200, 100);
+    f.send('pointerup', 3, 350, 100);
+    f.send('pointerdown', 4, 100, 100);
+    f.send('lostpointercapture', 4, 100, 100);
+    assert(!f.input.active && !f.drawing.stroke && f.changes() === 0);
+    f.send('pointerdown', 5, 100, 100);
+    f.input.cancel();
+    assert(!f.input.active && !f.drawing.stroke);
+  } finally { f.cleanup(); }
+});
+
+await test('Text opens only after a tap, never during a pinch or a swipe', () => {
+  const f = touchFixture('text');
+  try {
+    f.send('pointerdown', 1);
+    assert(f.text.blocks.size === 0);
+    f.send('pointerdown', 2, 200, 100);
+    f.send('pointerup', 2, 200, 100);
+    f.send('pointerup', 1);
+    assert(f.text.blocks.size === 0);
+    f.send('pointerdown', 3);
+    f.send('pointermove', 3, 140, 100);
+    f.send('pointerup', 3, 140, 100);
+    assert(f.text.blocks.size === 0);
+    f.send('pointerdown', 4);
+    f.send('pointerup', 4);
+    assert(f.text.blocks.size === 1);
+    assert(document.activeElement.matches('.text-editor'));
+  } finally { f.cleanup(); }
+});
+
+await test('A pinch started on a text handle cancels its provisional movement', () => {
+  const f = touchFixture('text');
+  try {
+    f.text.restore([{ id: 'move', x: 100, y: 100, size: 48, text: 'Move me' }]);
+    f.text.select('move');
+    const handle = f.text.blocks.get('move').element.querySelector('.text-handle');
+    f.send('pointerdown', 1, 100, 100, handle);
+    f.send('pointermove', 1, 150, 150);
+    assert(f.text.blocks.get('move').data.x === 150);
+    assert(f.text.serialize()[0].x === 100, 'Autosave must not include a provisional drag');
+    f.send('pointerdown', 2, 250, 150);
+    assert(f.text.blocks.get('move').data.x === 100 && !f.text.drag);
+    f.send('pointerup', 2, 250, 150);
+    f.send('pointerup', 1, 150, 150);
+  } finally { f.cleanup(); }
 });
 
 window.testResults = results;

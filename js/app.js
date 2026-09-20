@@ -1,8 +1,9 @@
 import { SIZES } from './config.js';
-import { Drawing, toPNG } from './drawing.js';
+import { Drawing } from './drawing.js';
 import { Viewport } from './viewport.js';
 import { TextLayer } from './text.js';
 import { Autosave, openDatabase, readBoard, writeBoard } from './storage.js';
+import { TouchInput } from './touch.js';
 
 const element = document.querySelector('#viewport');
 const canvas = document.querySelector('#drawing');
@@ -28,12 +29,13 @@ function status(state, message, detail = '') {
 
 const textLayer = new TextLayer(document.querySelector('#text-layer'), viewport,
   () => saver.schedule(),
-  index => { if (index >= 0) sizes.text = index; updateTools(); });
+  index => { if (index >= 0) sizes.text = index; updateTools(); },
+  document.querySelector('#text-actions'));
 
 const saver = new Autosave(async () => {
   // Capture text and bitmap before the first asynchronous boundary.
   const texts = textLayer.serialize().filter(text => text.text.trim());
-  const bitmap = await toPNG(canvas);
+  const bitmap = await drawing.snapshot();
   return { version: 1, bitmap, texts };
 }, async record => {
   if (loadFailed) throw new Error('The saved board could not be opened. Reload to retry, or Clear board to replace it.');
@@ -54,6 +56,7 @@ function updateTools() {
 }
 
 toolButtons.forEach(button => button.addEventListener('click', () => {
+  touch.cancel();
   textLayer.deselect();
   tool = button.dataset.tool;
   updateTools();
@@ -62,15 +65,36 @@ sizeButtons.forEach(button => {
   // Size selection should not blur and discard an empty text block.
   button.addEventListener('pointerdown', event => event.preventDefault());
   button.addEventListener('click', () => {
+    touch.cancel();
     sizes[tool] = Number(button.dataset.size);
     if (tool === 'text') textLayer.resize(SIZES.text[sizes.text]);
     updateTools();
   });
 });
 
+const touch = new TouchInput(element, viewport, drawing, textLayer, {
+  available: () => ready && !gesture,
+  tool: () => ({ tool, size: SIZES[tool][sizes[tool]] }),
+  changed: () => saver.schedule(0),
+});
+
+function updateVisibleArea() {
+  const visible = window.visualViewport;
+  const style = document.documentElement.style;
+  style.setProperty('--visible-top', `${visible?.offsetTop || 0}px`);
+  style.setProperty('--visible-height', `${visible?.height || window.innerHeight}px`);
+  style.setProperty('--visible-left', `${visible?.offsetLeft || 0}px`);
+  style.setProperty('--visible-width', `${visible?.width || window.innerWidth}px`);
+  textLayer.keepEditorVisible();
+}
+window.visualViewport?.addEventListener('resize', updateVisibleArea);
+window.visualViewport?.addEventListener('scroll', updateVisibleArea);
+window.addEventListener('resize', updateVisibleArea);
+updateVisibleArea();
+
 element.addEventListener('contextmenu', event => event.preventDefault());
 element.addEventListener('pointerdown', event => {
-  if (!ready || event.pointerType === 'touch' || gesture) return;
+  if (!ready || event.pointerType === 'touch' || touch.active || gesture) return;
   if (event.button === 2) {
     event.preventDefault();
     textLayer.commit();
@@ -120,7 +144,7 @@ function finishGesture(event) {
 element.addEventListener('pointerup', finishGesture);
 element.addEventListener('pointercancel', finishGesture);
 element.addEventListener('lostpointercapture', finishGesture);
-window.addEventListener('blur', () => finishGesture());
+window.addEventListener('blur', () => { touch.cancel(); textLayer.endDrag(true); finishGesture(); });
 
 document.addEventListener('keydown', event => {
   if (!ready || event.isComposing || event.target.matches('textarea, input, [contenteditable]')) return;
@@ -132,6 +156,7 @@ document.addEventListener('keydown', event => {
 
 document.querySelector('#clear').addEventListener('click', () => {
   if (!window.confirm('Clear all drawing and text? This cannot be undone.')) return;
+  touch.cancel();
   finishGesture();
   textLayer.clear();
   drawing.clear();
@@ -141,6 +166,8 @@ document.querySelector('#clear').addEventListener('click', () => {
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
+    touch.cancel();
+    textLayer.endDrag(true);
     finishGesture();
     textLayer.commit();
     if (saver.pending) saver.flush();

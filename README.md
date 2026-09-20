@@ -1,6 +1,6 @@
 # Kokuban
 
-A small, desktop-first whiteboard. Plain HTML, CSS, and JavaScript; no dependencies, build step, account, or backend.
+A small whiteboard for mouse, stylus, and touchscreen input. Plain HTML, CSS, and JavaScript; no dependencies, build step, account, or backend.
 
 ## Run locally
 
@@ -19,6 +19,15 @@ Open `http://localhost:8000`. Use HTTP rather than opening `index.html` directly
 - **Zoom:** scroll at the point you want to zoom toward, from whole-board fit to 800%.
 - **Pan:** drag with the right mouse button. A small part of the board always remains visible.
 - **Clear board:** removes drawing and text after confirmation. There is no application undo/redo; normal text-editor shortcuts still work while typing.
+
+On a touchscreen:
+
+- **One finger:** draw or erase with the selected tool.
+- **Two fingers:** drag to pan and pinch to zoom around the fingers' midpoint, with any tool selected. Adding a second finger cancels the provisional stroke or text movement so navigation leaves no accidental marks. Lift all fingers before drawing again.
+- **Text:** tap to create or edit; swipe and pinch do not create text. Drag the selected block's handle to move it. Use **Done** to finish editing or **Delete text** to remove it.
+- Tool buttons and touch drag handles remain finger-sized. Text controls sit at the top center (below the header on narrow screens), follow the visible viewport when the keyboard opens, and the board pans to keep the editor clear of the controls.
+
+Mouse controls remain available on devices with both mouse and touch input. Stylus drawing uses the selected fixed width; pressure sensitivity and device-specific palm rejection are not implemented.
 
 The board is 2048 × 2048 pixels. The initial view shows its centered quarter. Tool sizes are board pixels:
 
@@ -49,15 +58,16 @@ In desktop Chrome, use **Install app** when available or Chrome's own installati
 - `js/app.js`: application setup, tool state, input routing, and installation.
 - `js/drawing.js`: temporary active-stroke smoothing, bitmap drawing/erasing, and PNG handling.
 - `js/viewport.js`: board/screen coordinates, pointer-anchored zoom, and panning bounds.
+- `js/touch.js`: finger tracking, tap recognition, and transitions between drawing and two-finger navigation.
 - `js/text.js`: editable text, wrapping, selection, sizing, and movement.
 - `js/storage.js`: versioned IndexedDB records and serialized autosave.
 - `js/config.js`: board dimensions and tool presets.
 
-Only the current bitmap and text are persisted. Stroke samples exist only during the active gesture. There is no drawing history, server, external font, or analytics.
+Only the committed bitmap and text are persisted. Stroke samples exist only during the active gesture; provisional drawing and text movement are excluded from autosave until completed. There is no drawing history, server, external font, or analytics.
 
 ## Verification
 
-With the static server running, open `/tests/` (or `/kokuban/tests/` on a project site). The dependency-free browser checks exercise coordinates, zoom anchoring, panning limits, white/transparent pixels, antialiasing, erasing, PNG restoration, text layout, IndexedDB, and save ordering/errors. They use a temporary database and never modify your board.
+With the static server running, open `/tests/` (or `/kokuban/tests/` on a project site). The dependency-free browser checks exercise coordinates, zoom anchoring, panning limits, white/transparent pixels, antialiasing, erasing, PNG restoration, text layout, IndexedDB, and save ordering/errors. Touch checks also cover pinch math, cancellation, third-finger transitions, tap recognition, and excluding provisional edits from saves. They use a temporary database and never modify your board.
 
 Manual acceptance checks:
 
@@ -67,5 +77,7 @@ Manual acceptance checks:
 - Edit multiline text, move it near board edges, resize it, and check Delete inside and outside editing.
 - Reload after saving; confirm both drawing and text return. Cancel and accept Clear board.
 - Verify a GitHub Pages project path and Chrome installation/standalone launch.
+- On a phone/tablet, draw and erase with one finger, add a second finger mid-stroke, then pan/pinch. Confirm no stray marks remain and a remaining finger cannot resume drawing until all fingers lift.
+- Tap text, use Done/Delete, and drag its handle at different zoom levels. Verify the native keyboard, caret selection, orientation changes, and controls above the keyboard on Android Chrome and iOS Safari.
 
-Touchscreen gestures, import/export, collaboration, manual theme controls, and offline caching are intentionally deferred.
+Import/export, collaboration, manual theme controls, and offline caching are intentionally deferred.

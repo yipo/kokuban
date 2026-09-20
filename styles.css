@@ -10,6 +10,11 @@
   --selected: #ededeb;
   --accent: #5263cb;
   --shadow: 0 4px 20px #00000008;
+  --visible-top: 0px;
+  --visible-height: 100dvh;
+  --visible-left: 0px;
+  --visible-width: 100vw;
+  --handle-size: 24px;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 @media (prefers-color-scheme: dark) {
@@ -29,7 +34,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
 body { background: var(--page); color: var(--text); }
-button { font: inherit; color: inherit; cursor: pointer; }
+button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulation; }
 button:disabled { cursor: wait; opacity: .45; }
 button:focus-visible, #viewport:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 [hidden] { display: none !important; }
@@ -42,7 +47,7 @@ button:focus-visible, #viewport:focus-visible { outline: 2px solid var(--accent)
 #viewport[data-tool="pencil"], #viewport[data-tool="eraser"] { cursor: crosshair; }
 #viewport[data-tool="text"] { cursor: text; }
 #viewport.panning, #viewport.panning * { cursor: grabbing !important; }
-.topbar { position: fixed; inset: 24px 28px auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; pointer-events: none; }
+.topbar { position: fixed; inset: calc(var(--visible-top) + 24px) 28px auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; pointer-events: none; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; letter-spacing: -.4px; }
 .brand-mark { display: grid; place-items: center; width: 30px; height: 30px; color: var(--panel); background: var(--text); border-radius: 8px; font-size: 21px; font-weight: 700; }
 .top-actions { display: flex; align-items: center; gap: 16px; }
@@ -50,10 +55,10 @@ button:focus-visible, #viewport:focus-visible { outline: 2px solid var(--accent)
 #save-status[data-state="error"] { color: #bf5845; }
 .quiet-button { pointer-events: auto; border: 1px solid var(--line); background: var(--panel); padding: 8px 12px; border-radius: 8px; font-size: 12px; }
 .quiet-button:hover { background: var(--selected); }
-.toolbar { position: fixed; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 5px; padding: 7px; border: 1px solid var(--line); background: var(--panel); border-radius: 15px; box-shadow: var(--shadow); }
+.toolbar { position: fixed; top: calc(var(--visible-top) + var(--visible-height) / 2); transform: translateY(-50%); display: flex; flex-direction: column; gap: 5px; padding: 7px; border: 1px solid var(--line); background: var(--panel); border-radius: 15px; box-shadow: var(--shadow); }
 .tools { left: 24px; }
 .sizes { right: 24px; }
-.toolbar button { display: grid; place-items: center; width: 42px; height: 42px; padding: 10px; border: 0; border-radius: 9px; background: transparent; }
+.toolbar button { display: grid; place-items: center; width: 44px; height: 44px; padding: 10px; border: 0; border-radius: 9px; background: transparent; }
 .toolbar button:hover { background: var(--selected); }
 .toolbar button[aria-pressed="true"] { background: var(--selected); color: var(--ink); }
 .toolbar svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
@@ -62,7 +67,7 @@ button:focus-visible, #viewport:focus-visible { outline: 2px solid var(--accent)
 .size-dot.small { width: 4px; height: 4px; }
 .size-dot.medium { width: 9px; height: 9px; }
 .size-dot.large { width: 15px; height: 15px; }
-.footer { position: fixed; inset: auto 28px 22px; display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; pointer-events: none; }
+.footer { position: fixed; inset: auto 28px calc(100% - var(--visible-top) - var(--visible-height) + 22px); display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; pointer-events: none; }
 .separator { margin: 0 8px; }
 #zoom { font-variant-numeric: tabular-nums; }
 .text-block { position: absolute; pointer-events: none; }
@@ -70,11 +75,27 @@ button:focus-visible, #viewport:focus-visible { outline: 2px solid var(--accent)
 .text-block.selected { outline: calc(1px / var(--zoom, 1)) solid var(--accent); }
 .text-editor { display: block; width: 100%; margin: 0; padding: 2px; resize: none; border: 0; outline: 0; border-radius: 0; background: transparent; color: inherit; font-family: inherit; line-height: 1.25; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; cursor: inherit; }
 .text-editor[readonly] { pointer-events: none; user-select: none; }
-.text-handle { display: none; position: absolute; left: 0; top: 0; transform: translateY(-100%); padding: 2px 8px; border: 0; border-radius: 4px 4px 0 0; color: white; background: #5263cb; font-size: 16px; line-height: 1; cursor: grab; }
+#viewport[data-tool="text"] .text-editor { pointer-events: auto; }
+.text-handle { display: none; position: absolute; left: min(0px, calc(2048px - var(--text-left, 0px) - var(--handle-size) / var(--zoom, 1))); top: max(0px, calc(var(--handle-size) / var(--zoom, 1) - var(--text-top, 0px))); transform: translateY(-100%); width: calc(var(--handle-size) / var(--zoom, 1)); height: calc(var(--handle-size) / var(--zoom, 1)); padding: 0; border: 0; border-radius: 4px 4px 0 0; color: white; background: #5263cb; font-size: calc(18px / var(--zoom, 1)); line-height: 1; cursor: grab; touch-action: none; }
 .selected .text-handle { display: block; }
+#text-actions { position: fixed; top: calc(var(--visible-top) + max(24px, env(safe-area-inset-top, 0px))); left: calc(var(--visible-left) + var(--visible-width) / 2); transform: translateX(-50%); display: flex; gap: 8px; padding: 6px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: var(--shadow); }
+#text-actions button { min-height: 44px; min-width: 64px; }
+.touch-hint { display: none; }
+:root[data-input="touch"] { --handle-size: 44px; }
+:root[data-input="touch"] .mouse-hint { display: none; }
+:root[data-input="touch"] .touch-hint { display: inline; }
+@media (pointer: coarse) {
+  :root { --handle-size: 44px; }
+  .quiet-button { min-height: 44px; }
+  .mouse-hint { display: none; }
+  .touch-hint { display: inline; }
+}
 noscript { position: fixed; left: 20%; top: 40%; padding: 24px; background: var(--panel); }
+@media (max-width: 800px) {
+  #text-actions { top: calc(var(--visible-top) + 80px + env(safe-area-inset-top, 0px)); }
+}
 @media (max-width: 600px) {
-  .topbar { inset: 16px 14px auto; }
+  .topbar { inset: calc(var(--visible-top) + 16px) 14px auto; }
   .top-actions { gap: 8px; }
   .brand > span:last-child { display: none; }
   .tools { left: 10px; }

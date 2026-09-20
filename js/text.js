@@ -1,18 +1,29 @@
 import { BOARD_SIZE, FONT, SIZES, clamp } from './config.js';
 
 export class TextLayer {
-  constructor(layer, viewport, onChange, onSelect) {
+  constructor(layer, viewport, onChange, onSelect, actions = null) {
     this.layer = layer;
     this.viewport = viewport;
     this.onChange = onChange;
     this.onSelect = onSelect;
+    this.actions = actions;
     this.blocks = new Map();
     this.selected = null;
     this.drag = null;
     this.measure = document.createElement('canvas').getContext('2d');
+    if (actions) {
+      actions.addEventListener('pointerdown', event => event.preventDefault());
+      actions.querySelector('[data-action="done"]').addEventListener('click', () => this.deselect());
+      actions.querySelector('[data-action="delete"]').addEventListener('click', () => this.removeSelected());
+    }
   }
 
-  serialize() { return [...this.blocks.values()].map(({ data }) => ({ ...data })); }
+  serialize() {
+    return [...this.blocks.values()].map(({ data }) => ({
+      ...data,
+      ...(this.drag?.id === data.id ? this.drag.original : {}),
+    }));
+  }
 
   restore(records) {
     for (const record of records) this.add({ ...record });
@@ -52,31 +63,17 @@ export class TextLayer {
       event.stopPropagation();
       if (event.target === handle) {
         event.preventDefault();
-        this.commit();
-        if (!this.blocks.has(data.id)) return;
-        this.select(data.id);
+        if (!this.startDrag(data.id, event)) return;
         handle.focus({ preventScroll: true });
-        const point = this.viewport.boardPoint(event);
-        this.drag = { id: data.id, pointerId: event.pointerId, x: point.x - data.x, y: point.y - data.y, moved: false };
         handle.setPointerCapture(event.pointerId);
       } else {
         if (editor.readOnly) event.preventDefault();
         this.edit(data.id);
       }
     });
-    handle.addEventListener('pointermove', event => {
-      if (!this.drag || this.drag.pointerId !== event.pointerId) return;
-      const point = this.viewport.boardPoint(event);
-      data.x = point.x - this.drag.x;
-      data.y = point.y - this.drag.y;
-      this.layout(block);
-      this.drag.moved = true;
-    });
-    const finishDrag = () => {
-      if (this.drag?.id !== data.id) return;
-      const moved = this.drag.moved;
-      this.drag = null;
-      if (moved) this.onChange();
+    handle.addEventListener('pointermove', event => this.moveDrag(event));
+    const finishDrag = event => {
+      if (this.drag?.pointerId === event.pointerId) this.endDrag(event.type !== 'pointerup');
     };
     handle.addEventListener('pointerup', finishDrag);
     handle.addEventListener('pointercancel', finishDrag);
@@ -85,6 +82,7 @@ export class TextLayer {
       data.text = editor.value;
       this.layout(block);
       this.onChange();
+      this.keepEditorVisible();
     });
     editor.addEventListener('blur', () => this.commit());
     editor.addEventListener('keydown', event => {
@@ -111,13 +109,14 @@ export class TextLayer {
     data.y = clamp(data.y, 0, BOARD_SIZE - height);
     element.style.left = `${data.x}px`;
     element.style.top = `${data.y}px`;
-    // Keep the handle reachable for text at the top edge.
-    element.querySelector('.text-handle').style.transform = data.y < 24 ? 'none' : 'translateY(-100%)';
+    element.style.setProperty('--text-top', `${data.y}px`);
+    element.style.setProperty('--text-left', `${data.x}px`);
   }
 
   select(id) {
     this.selected = id;
     for (const block of this.blocks.values()) block.element.classList.toggle('selected', block.data.id === id);
+    if (this.actions) this.actions.hidden = !id;
     if (id) this.onSelect(SIZES.text.indexOf(this.blocks.get(id).data.size));
   }
 
@@ -128,6 +127,53 @@ export class TextLayer {
     this.select(id);
     block.editor.readOnly = false;
     block.editor.focus({ preventScroll: true });
+    this.keepEditorVisible();
+  }
+
+  startDrag(id, event) {
+    this.commit();
+    const block = this.blocks.get(id);
+    if (!block) return false;
+    this.select(id);
+    const point = this.viewport.boardPoint(event);
+    const { x, y } = block.data;
+    this.drag = { id, pointerId: event.pointerId, x: point.x - x, y: point.y - y, original: { x, y }, moved: false };
+    return true;
+  }
+
+  moveDrag(event) {
+    if (!this.drag || this.drag.pointerId !== event.pointerId) return;
+    const block = this.blocks.get(this.drag.id);
+    const point = this.viewport.boardPoint(event);
+    block.data.x = point.x - this.drag.x;
+    block.data.y = point.y - this.drag.y;
+    this.layout(block);
+    this.drag.moved = true;
+  }
+
+  endDrag(cancel = false) {
+    if (!this.drag) return;
+    const { id, original, moved } = this.drag;
+    this.drag = null;
+    const block = this.blocks.get(id);
+    if (cancel && block) { Object.assign(block.data, original); this.layout(block); }
+    else if (moved) this.onChange();
+  }
+
+  keepEditorVisible() {
+    const block = this.blocks.get(this.selected);
+    if (!block || document.activeElement !== block.editor || !this.viewport.pan) return;
+    const visible = window.visualViewport;
+    if (!visible) return;
+    const bounds = block.editor.getBoundingClientRect();
+    const left = visible.offsetLeft + 80;
+    const right = visible.offsetLeft + visible.width - 80;
+    const actionsBottom = this.actions && !this.actions.hidden ? this.actions.getBoundingClientRect().bottom + 16 : 0;
+    const top = Math.max(visible.offsetTop + 80, actionsBottom);
+    const bottom = visible.offsetTop + visible.height - 40;
+    const dx = bounds.left < left ? left - bounds.left : bounds.right > right ? Math.max(left - bounds.left, right - bounds.right) : 0;
+    const dy = bounds.top < top ? top - bounds.top : bounds.bottom > bottom ? Math.max(top - bounds.top, bottom - bounds.bottom) : 0;
+    if (dx || dy) this.viewport.pan(dx, dy);
   }
 
   commit() {
@@ -147,20 +193,23 @@ export class TextLayer {
     if (!block) return;
     block.data.size = size;
     this.layout(block);
+    this.keepEditorVisible();
     this.onChange();
   }
 
   removeSelected() {
     const block = this.blocks.get(this.selected);
     if (!block) return;
-    this.selected = null;
+    this.select(null);
+    this.drag = null;
     this.blocks.delete(block.data.id);
     block.element.remove();
     this.onChange();
   }
 
   clear() {
-    this.selected = null;
+    this.select(null);
+    this.drag = null;
     this.blocks.clear();
     this.layer.replaceChildren();
   }

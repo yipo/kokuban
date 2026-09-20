@@ -75,6 +75,19 @@ export class Drawing {
     return true;
   }
 
+  cancel() {
+    if (!this.stroke) return;
+    cancelAnimationFrame(this.frame);
+    this.frame = 0;
+    this.context.clearRect(0, 0, BOARD_SIZE, BOARD_SIZE);
+    this.context.drawImage(this.base, 0, 0);
+    this.stroke = null;
+    this.baseContext.clearRect(0, 0, BOARD_SIZE, BOARD_SIZE);
+  }
+
+  // A provisional finger stroke may turn into a pinch; never autosave it early.
+  snapshot() { return toPNG(this.stroke ? this.base : this.canvas); }
+
   clear() { this.finish(); this.context.clearRect(0, 0, BOARD_SIZE, BOARD_SIZE); }
 
   async restore(blob) {

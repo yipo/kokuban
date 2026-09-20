@@ -48,7 +48,11 @@
       <button data-size="2" aria-label="Large" aria-pressed="false" disabled><span class="size-dot large"></span></button>
     </div>
 
-    <footer class="footer"><span>Scroll to zoom <span class="separator">·</span> Right-drag to move</span><output id="zoom" aria-label="Zoom level">100%</output></footer>
+    <div id="text-actions" role="toolbar" aria-label="Selected text" hidden>
+      <button class="quiet-button" data-action="done">Done</button>
+      <button class="quiet-button" data-action="delete">Delete text</button>
+    </div>
+    <footer class="footer"><span class="mouse-hint">Scroll to zoom <span class="separator">·</span> Right-drag to move</span><span class="touch-hint">One finger to draw <span class="separator">·</span> Two to move &amp; zoom</span><output id="zoom" aria-label="Zoom level">100%</output></footer>
     <noscript>Kokuban needs JavaScript enabled to draw and save your board.</noscript>
   </body>
 </html>

@@ -9,6 +9,17 @@ export function zoomAt(camera, point, scale) {
   return { scale, x: point.x - anchor.x * scale, y: point.y - anchor.y * scale };
 }
 
+export function touchPair(points) {
+  const [a, b] = points;
+  return { center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, distance: Math.hypot(b.x - a.x, b.y - a.y) };
+}
+
+export function pinchCamera(camera, start, current, minimum, maximum = 8) {
+  const scale = clamp(camera.scale * current.distance / Math.max(start.distance, 1), minimum, maximum);
+  const anchor = toBoard(start.center, camera);
+  return { scale, x: current.center.x - anchor.x * scale, y: current.center.y - anchor.y * scale };
+}
+
 export function constrain(camera, width, height) {
   const extent = BOARD_SIZE * camera.scale;
   const visible = Math.min(64, extent, width, height);
