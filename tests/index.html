@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Kokuban browser checks</title>
+    <link rel="stylesheet" href="../styles.css">
+    <style>
+      html, body { overflow: auto; height: auto; }
+      body { padding: 32px; }
+      li { margin: 10px 0; }
+      .pass { color: #38834d; } .fail { color: #c44242; }
+      #fixture { position: absolute; left: -10000px; top: 0; width: 2048px; }
+    </style>
+    <script type="module" src="./tests.js"></script>
+  </head>
+  <body>
+    <h1>Kokuban browser checks</h1>
+    <p>These checks use an isolated temporary database and do not change your board.</p>
+    <p id="summary">Running…</p>
+    <ol id="results"></ol>
+    <div id="fixture"></div>
+  </body>
+</html>
