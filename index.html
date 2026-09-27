@@ -42,10 +42,16 @@
       </button>
     </div>
 
-    <div id="sizes" class="toolbar sizes" role="toolbar" aria-label="Pencil size">
+    <div id="sizes" class="toolbar sizes" role="toolbar" aria-label="Pencil size and pencil color">
       <button data-size="0" aria-label="Small" aria-pressed="false" disabled><span class="size-dot small"></span></button>
       <button data-size="1" aria-label="Medium" aria-pressed="true" disabled><span class="size-dot medium"></span></button>
       <button data-size="2" aria-label="Large" aria-pressed="false" disabled><span class="size-dot large"></span></button>
+      <span class="toolbar-divider" aria-hidden="true"></span>
+      <button id="color-toggle" aria-label="Pencil color" aria-expanded="false" aria-controls="colors" hidden disabled>
+        <span class="color-swatch" aria-hidden="true"></span>
+        <span class="color-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div id="colors" class="color-palette" role="group" aria-label="Pencil color"></div>
     </div>
 
     <div id="text-actions" role="toolbar" aria-label="Selected text" hidden>

@@ -49,7 +49,7 @@ export class TouchInput {
     }
     if (this.navigating) { event.preventDefault(); return; }
 
-    const { tool, size } = this.options.tool();
+    const { tool, size, color } = this.options.tool();
     const block = tool === 'text' ? event.target.closest('.text-block') : null;
     const editor = block?.querySelector('.text-editor');
     if (event.target === editor && !editor.readOnly && document.activeElement === editor) {
@@ -68,7 +68,7 @@ export class TouchInput {
     } else {
       this.text.deselect();
       if (this.viewport.contains(boardPoint)) {
-        this.drawing.begin(boardPoint, size, tool === 'eraser');
+        this.drawing.begin(boardPoint, size, tool === 'eraser', color);
         this.gesture = { type: 'draw' };
       }
     }

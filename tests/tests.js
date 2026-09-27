@@ -1,9 +1,10 @@
-import { BOARD_SIZE, SIZES } from '../js/config.js';
+import { BOARD_SIZE, SIZES, COLORS } from '../js/config.js';
 import { toBoard, zoomAt, constrain, touchPair, pinchCamera } from '../js/viewport.js';
 import { Drawing, paintStroke, toPNG } from '../js/drawing.js';
 import { TextLayer } from '../js/text.js';
 import { Autosave, openDatabase, readBoard, writeBoard } from '../js/storage.js';
 import { TouchInput } from '../js/touch.js';
+import { ColorPicker } from '../js/colors.js';
 
 const results = [];
 const assert = (condition, message = 'Assertion failed') => { if (!condition) throw new Error(message); };
@@ -87,12 +88,108 @@ await test('Active stroke is flattened and releases its samples on completion', 
 
 await test('PNG remains white-on-transparent regardless of the display filter', async () => {
   const surface = canvas();
-  surface.style.filter = 'invert(1)';
+  surface.style.filter = 'invert(1) hue-rotate(180deg)';
   paintStroke(surface.getContext('2d'), [{ x: 50, y: 50 }], 12);
   const copy = canvas();
   await new Drawing(copy).restore(await toPNG(surface));
   assert(pixel(copy, 50, 50).join() === '255,255,255,255');
   assert(pixel(copy, 0, 0).join() === '0,0,0,0');
+});
+
+await test('Every pencil color fills dots and curves, survives PNG, and erases to transparency', async () => {
+  const surface = canvas();
+  const context = surface.getContext('2d');
+  // Use the browser's own solid fill as reference for OKLCH gamut mapping.
+  const reference = canvas();
+  const referenceContext = reference.getContext('2d');
+  const expected = COLORS.map(({ value }, index) => {
+    assert(CSS.supports('color', value), `Unsupported color: ${value}`);
+    referenceContext.fillStyle = value;
+    referenceContext.fillRect(index, 0, 1, 1);
+    return pixel(reference, index, 0).join();
+  });
+  COLORS.forEach(({ value }, index) => {
+    const y = 30 + index * 30;
+    paintStroke(context, [{ x: 30, y }], 12, false, value);
+    paintStroke(context, [{ x: 80, y }, { x: 120, y: y + 10 }, { x: 160, y }], 12, false, value);
+    assert(pixel(surface, 30, y).join() === expected[index], 'Dot color differs');
+    assert(pixel(surface, 160, y).join() === expected[index], 'Curve color differs');
+  });
+  surface.style.filter = 'invert(1) hue-rotate(180deg)';
+  const copy = canvas();
+  await new Drawing(copy).restore(await toPNG(surface));
+  COLORS.forEach((color, index) => {
+    const y = 30 + index * 30;
+    assert(pixel(copy, 30, y).join() === expected[index], 'PNG changed color');
+    paintStroke(context, [{ x: 30, y }], 20, true, COLORS[6].value);
+    assert(pixel(surface, 30, y).join() === '0,0,0,0', 'Color prevented erasing');
+  });
+  assert(pixel(copy, 0, 0).join() === '0,0,0,0');
+});
+
+await test('Stroke color remains fixed through rendering, snapshots, and cancellation', async () => {
+  const surface = canvas();
+  const drawing = new Drawing(surface);
+  drawing.begin({ x: 50, y: 50 }, 12, false, COLORS[1].value);
+  const red = pixel(surface, 50, 50).join();
+  drawing.move({ x: 100, y: 50 });
+  drawing.finish();
+  assert(pixel(surface, 100, 50).join() === red);
+  drawing.begin({ x: 150, y: 50 }, 12, false, COLORS[4].value);
+  const restored = canvas();
+  await new Drawing(restored).restore(await drawing.snapshot());
+  assert(pixel(restored, 100, 50).join() === red);
+  assert(pixel(restored, 150, 50)[3] === 0);
+  drawing.cancel();
+  assert(pixel(surface, 100, 50).join() === red && pixel(surface, 150, 50)[3] === 0);
+  drawing.begin({ x: 100, y: 50 }, 20, true, COLORS[6].value);
+  drawing.cancel();
+  assert(pixel(surface, 100, 50).join() === red);
+});
+
+await test('Color dropdown retains selection, navigates by keyboard, and dismisses accessibly', () => {
+  const toolbar = document.createElement('div');
+  toolbar.className = 'toolbar sizes';
+  toolbar.innerHTML = '<button aria-controls="test-colors" aria-expanded="false"><span class="color-swatch"></span></button><div id="test-colors" class="color-palette"></div>';
+  document.body.append(toolbar);
+  const toggle = toolbar.querySelector('button');
+  const panel = toolbar.querySelector('.color-palette');
+  const picker = new ColorPicker(toolbar, toggle, panel);
+  const key = (target, value) => target.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }));
+  try {
+    assert(picker.value === '#fff');
+    picker.buttons[2].click();
+    assert(picker.value === COLORS[2].value);
+    assert(panel.querySelectorAll('[aria-pressed="true"]').length === 1);
+    // Force insufficient room regardless of the test runner's viewport size.
+    toolbar.style.minHeight = '100vh';
+    picker.updateLayout();
+    assert(picker.compact && panel.hidden && !toggle.hidden);
+    for (let i = 0; i < 3; i++) picker.updateLayout();
+    assert(picker.compact, 'Collapsed height must not change the breakpoint');
+    toggle.focus();
+    key(toggle, 'ArrowDown');
+    assert(!panel.hidden && toggle.getAttribute('aria-expanded') === 'true');
+    assert(document.activeElement === picker.buttons[2]);
+    key(panel, 'ArrowDown');
+    assert(document.activeElement === picker.buttons[5]);
+    picker.buttons[5].click();
+    assert(picker.value === COLORS[5].value && panel.hidden && document.activeElement === toggle);
+    picker.show(true);
+    key(panel, 'Escape');
+    assert(panel.hidden && document.activeElement === toggle);
+    picker.show();
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    assert(panel.hidden && toggle.getAttribute('aria-expanded') === 'false');
+    // A minimal expanded toolbar fits even in small test viewports.
+    toolbar.style.minHeight = '';
+    picker.buttons.forEach(button => button.style.height = '1px');
+    panel.style.gap = '0px';
+    picker.show(true);
+    picker.updateLayout();
+    assert(!picker.compact && !panel.hidden && toggle.hidden);
+    assert(picker.value === COLORS[5].value && document.activeElement === picker.buttons[5]);
+  } finally { picker.destroy(); toolbar.remove(); }
 });
 
 await test('Text wraps at the edge, remains editable, resizes, and discards empty blocks', () => {
@@ -204,7 +301,7 @@ await test('Canceling drawing or erasing restores the bitmap and excludes provis
   assert(!drawing.stroke && !drawing.frame);
 });
 
-function touchFixture(tool = 'pencil') {
+function touchFixture(tool = 'pencil', color = '#fff') {
   const element = document.createElement('div');
   const layer = document.createElement('div');
   document.querySelector('#fixture').append(element);
@@ -225,7 +322,7 @@ function touchFixture(tool = 'pencil') {
   const text = new TextLayer(layer, viewport, () => {}, () => {});
   let changes = 0;
   const input = new TouchInput(element, viewport, drawing, text, {
-    available: () => true, tool: () => ({ tool, size: tool === 'text' ? 48 : 12 }), changed: () => changes++,
+    available: () => true, tool: () => ({ tool, size: tool === 'text' ? 48 : 12, color }), changed: () => changes++,
   });
   const send = (type, id, x = 100, y = 100, target = element) => target.dispatchEvent(new PointerEvent(type, {
     pointerType: 'touch', pointerId: id, clientX: x, clientY: y, bubbles: true, cancelable: true,
@@ -251,6 +348,22 @@ await test('Second finger rolls back the stroke; one remaining finger cannot res
     f.send('pointerdown', 3, 150, 150);
     f.send('pointerup', 3, 150, 150);
     assert(f.changes() === 1 && !f.drawing.stroke);
+  } finally { f.cleanup(); }
+});
+
+await test('Touch uses the selected pencil color and a pinch rolls back only provisional color', () => {
+  const f = touchFixture('pencil', COLORS[3].value);
+  try {
+    f.send('pointerdown', 1, 50, 50);
+    f.send('pointerup', 1, 50, 50);
+    const green = pixel(f.drawing.canvas, 50, 50).join();
+    assert(green !== '255,255,255,255' && pixel(f.drawing.canvas, 50, 50)[3] === 255);
+    f.send('pointerdown', 2, 100, 100);
+    assert(pixel(f.drawing.canvas, 100, 100).join() === green);
+    f.send('pointerdown', 3, 200, 100);
+    assert(pixel(f.drawing.canvas, 100, 100)[3] === 0);
+    assert(pixel(f.drawing.canvas, 50, 50).join() === green);
+    assert(f.changes() === 1);
   } finally { f.cleanup(); }
 });
 

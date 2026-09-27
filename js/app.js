@@ -4,6 +4,7 @@ import { Viewport } from './viewport.js';
 import { TextLayer } from './text.js';
 import { Autosave, openDatabase, readBoard, writeBoard } from './storage.js';
 import { TouchInput } from './touch.js';
+import { ColorPicker } from './colors.js';
 
 const element = document.querySelector('#viewport');
 const canvas = document.querySelector('#drawing');
@@ -13,6 +14,7 @@ const statusElement = document.querySelector('#save-status');
 const toolButtons = [...document.querySelectorAll('[data-tool]')];
 const sizeButtons = [...document.querySelectorAll('[data-size]')];
 const sizes = { pencil: 1, eraser: 1, text: 1 };
+const colorPicker = new ColorPicker(document.querySelector('#sizes'), document.querySelector('#color-toggle'), document.querySelector('#colors'));
 let tool = 'pencil';
 let ready = false;
 let gesture = null;
@@ -46,7 +48,7 @@ const saver = new Autosave(async () => {
 function updateTools() {
   element.dataset.tool = tool;
   toolButtons.forEach(button => button.setAttribute('aria-pressed', button.dataset.tool === tool));
-  document.querySelector('#sizes').setAttribute('aria-label', `${tool} size`);
+  document.querySelector('#sizes').setAttribute('aria-label', `${tool} size and pencil color`);
   sizeButtons.forEach((button, index) => {
     button.setAttribute('aria-pressed', index === sizes[tool]);
     const name = ['Small', 'Medium', 'Large'][index];
@@ -74,7 +76,7 @@ sizeButtons.forEach(button => {
 
 const touch = new TouchInput(element, viewport, drawing, textLayer, {
   available: () => ready && !gesture,
-  tool: () => ({ tool, size: SIZES[tool][sizes[tool]] }),
+  tool: () => ({ tool, size: SIZES[tool][sizes[tool]], color: colorPicker.value }),
   changed: () => saver.schedule(0),
 });
 
@@ -85,6 +87,7 @@ function updateVisibleArea() {
   style.setProperty('--visible-height', `${visible?.height || window.innerHeight}px`);
   style.setProperty('--visible-left', `${visible?.offsetLeft || 0}px`);
   style.setProperty('--visible-width', `${visible?.width || window.innerWidth}px`);
+  colorPicker.updateLayout();
   textLayer.keepEditorVisible();
 }
 window.visualViewport?.addEventListener('resize', updateVisibleArea);
@@ -111,7 +114,7 @@ element.addEventListener('pointerdown', event => {
     }
     event.preventDefault();
     element.focus({ preventScroll: true });
-    drawing.begin(point, SIZES[tool][sizes[tool]], tool === 'eraser');
+    drawing.begin(point, SIZES[tool][sizes[tool]], tool === 'eraser', colorPicker.value);
     gesture = { type: 'draw', id: event.pointerId };
   } else return;
   element.setPointerCapture(event.pointerId);

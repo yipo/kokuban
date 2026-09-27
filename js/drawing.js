@@ -2,11 +2,11 @@ import { BOARD_SIZE } from './config.js';
 
 const midpoint = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
-export function paintStroke(context, points, size, erase = false) {
+export function paintStroke(context, points, size, erase = false, color = '#fff') {
   if (!points.length) return;
   context.save();
   context.globalCompositeOperation = erase ? 'destination-out' : 'source-over';
-  context.strokeStyle = context.fillStyle = '#fff';
+  context.strokeStyle = context.fillStyle = color;
   context.lineWidth = size;
   context.lineCap = context.lineJoin = 'round';
   context.beginPath();
@@ -42,10 +42,10 @@ export class Drawing {
     this.frame = 0;
   }
 
-  begin(point, size, erase) {
+  begin(point, size, erase, color = '#fff') {
     this.baseContext.clearRect(0, 0, BOARD_SIZE, BOARD_SIZE);
     this.baseContext.drawImage(this.canvas, 0, 0);
-    this.stroke = { points: [point], size, erase };
+    this.stroke = { points: [point], size, erase, color };
     this.render();
   }
 
@@ -62,7 +62,7 @@ export class Drawing {
     // Redraw only the active gesture over a snapshot, avoiding alpha buildup at segment joins.
     this.context.clearRect(0, 0, BOARD_SIZE, BOARD_SIZE);
     this.context.drawImage(this.base, 0, 0);
-    paintStroke(this.context, this.stroke.points, this.stroke.size, this.stroke.erase);
+    paintStroke(this.context, this.stroke.points, this.stroke.size, this.stroke.erase, this.stroke.color);
   }
 
   finish() {
