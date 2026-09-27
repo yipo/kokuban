@@ -2,7 +2,7 @@ import { BOARD_SIZE, SIZES, COLORS } from '../js/config.js';
 import { toBoard, zoomAt, constrain, touchPair, pinchCamera } from '../js/viewport.js';
 import { Drawing, paintStroke, toPNG } from '../js/drawing.js';
 import { TextLayer } from '../js/text.js';
-import { Autosave, openDatabase, readBoard, writeBoard } from '../js/storage.js';
+import { Autosave, openDatabase, readBoard, writeBoard, validateRecord } from '../js/storage.js';
 import { TouchInput } from '../js/touch.js';
 import { ColorPicker } from '../js/colors.js';
 
@@ -154,11 +154,20 @@ await test('Color dropdown retains selection, navigates by keyboard, and dismiss
   document.body.append(toolbar);
   const toggle = toolbar.querySelector('button');
   const panel = toolbar.querySelector('.color-palette');
-  const picker = new ColorPicker(toolbar, toggle, panel);
+  const selections = [];
+  const picker = new ColorPicker(toolbar, toggle, panel, color => selections.push(color));
   const key = (target, value) => target.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }));
   try {
     assert(picker.value === '#fff');
+    picker.setColor(COLORS[4].value, 'text');
+    assert(picker.value === COLORS[4].value && selections.length === 0);
+    assert(panel.getAttribute('aria-label') === 'Text color');
+    assert(picker.buttons[4].getAttribute('aria-label') === 'Cyan text color');
+    assert(toggle.getAttribute('aria-label') === 'Text color: Cyan');
     picker.buttons[2].click();
+    assert(selections.join() === COLORS[2].value);
+    picker.setColor(COLORS[2].value, 'pencil');
+    assert(panel.getAttribute('aria-label') === 'Pencil color' && selections.length === 1);
     assert(picker.value === COLORS[2].value);
     assert(panel.querySelectorAll('[aria-pressed="true"]').length === 1);
     // Force insufficient room regardless of the test runner's viewport size.
@@ -213,6 +222,78 @@ await test('Text wraps at the edge, remains editable, resizes, and discards empt
   layer.clear();
 });
 
+await test('Text colors preserve editing and only actual recoloring schedules a change', () => {
+  const fixture = document.querySelector('#fixture');
+  let changes = 0;
+  const selections = [];
+  const layer = new TextLayer(fixture, { element: fixture }, () => changes++, (size, color) => selections.push({ size, color }));
+  try {
+    layer.restore([{ id: 'legacy', x: 40, y: 50, size: 48, text: 'Existing text' }]);
+    assert(layer.serialize()[0].color === '#fff');
+    layer.edit('legacy');
+    const block = layer.blocks.get('legacy');
+    block.editor.setSelectionRange(2, 7, 'backward');
+    assert(changes === 0 && selections.at(-1).color === '#fff');
+    layer.recolor(COLORS[1].value);
+    assert(changes === 1 && block.data.color === COLORS[1].value);
+    assert(document.activeElement === block.editor && !block.editor.readOnly);
+    assert(block.editor.selectionStart === 2 && block.editor.selectionEnd === 7 && block.editor.selectionDirection === 'backward');
+    assert(block.editor.value === 'Existing text');
+    layer.recolor(COLORS[1].value);
+    layer.commit();
+    layer.select('legacy');
+    assert(changes === 1, 'Same color, commit, and selection must not trigger redundant saves');
+    assert(selections.at(-1).color === COLORS[1].value && selections.at(-1).size === 1);
+    layer.deselect();
+    layer.recolor(COLORS[2].value);
+    assert(changes === 1, 'No selected text must not change the board');
+    layer.create({ x: 50, y: 150 }, 24, COLORS[3].value);
+    const fresh = layer.blocks.get(layer.selected);
+    assert(fresh.data.color === COLORS[3].value && selections.at(-1).color === COLORS[3].value);
+    layer.recolor(COLORS[4].value);
+    assert(fresh.editor === document.activeElement && !fresh.editor.readOnly && fresh.data.text === '');
+    fresh.editor.value = 'New text';
+    fresh.editor.dispatchEvent(new Event('input'));
+    const records = layer.serialize();
+    layer.clear();
+    layer.restore(records);
+    assert(layer.blocks.get('legacy').data.color === COLORS[1].value);
+    assert(layer.blocks.get(fresh.data.id).data.color === COLORS[4].value);
+    assert(layer.blocks.get(fresh.data.id).editor.style.color !== '');
+  } finally { layer.clear(); }
+});
+
+await test('Text color changes survive provisional drag cancellation and snapshots', () => {
+  const fixture = document.querySelector('#fixture');
+  const layer = new TextLayer(fixture, { element: fixture, boardPoint: event => ({ x: event.clientX, y: event.clientY }) }, () => {}, () => {});
+  try {
+    layer.restore([{ id: 'color-drag', x: 50, y: 50, size: 24, color: COLORS[1].value, text: 'Move me' }]);
+    layer.startDrag('color-drag', { pointerId: 1, clientX: 50, clientY: 50 });
+    layer.moveDrag({ clientX: 100, clientY: 100 });
+    layer.recolor(COLORS[5].value);
+    const record = layer.serialize()[0];
+    assert(record.x === 50 && record.y === 50 && record.color === COLORS[5].value);
+    layer.endDrag(true);
+    assert(layer.blocks.get('color-drag').data.x === 50 && layer.blocks.get('color-drag').data.color === COLORS[5].value);
+  } finally { layer.clear(); }
+});
+
+await test('Saved text accepts legacy and palette colors and rejects invalid colors', () => {
+  const text = { id: 'validation', x: 0, y: 0, size: 24, text: 'Color' };
+  const record = { version: 1, bitmap: new Blob(), texts: [text] };
+  assert(validateRecord(record) === record);
+  for (const { value } of COLORS) {
+    text.color = value;
+    assert(validateRecord(record) === record);
+  }
+  for (const color of [null, 0, {}, '', 'red', '#000', 'oklch(80% 70% 10)']) {
+    text.color = color;
+    let rejected = false;
+    try { validateRecord(record); } catch { rejected = true; }
+    assert(rejected, `Invalid color accepted: ${JSON.stringify(color)}`);
+  }
+});
+
 await test('IndexedDB round-trips PNG/text and rejects invalid records', async () => {
   const name = `kokuban-test-${crypto.randomUUID()}`;
   const database = await openDatabase(name);
@@ -223,6 +304,10 @@ await test('IndexedDB round-trips PNG/text and rejects invalid records', async (
     await writeBoard(database, '/test/', record);
     const restored = await readBoard(database, '/test/');
     assert(restored.texts[0].text === 'Hello\n世界');
+    record.texts[0].color = COLORS[6].value;
+    await writeBoard(database, '/test/', record);
+    const colored = await readBoard(database, '/test/');
+    assert(colored.texts[0].color === COLORS[6].value);
     const copy = canvas();
     await new Drawing(copy).restore(restored.bitmap);
     assert(pixel(copy, 25, 25)[3] === 255);
@@ -388,7 +473,7 @@ await test('Third-finger changes, pointer cancellation, and capture loss leave n
 });
 
 await test('Text opens only after a tap, never during a pinch or a swipe', () => {
-  const f = touchFixture('text');
+  const f = touchFixture('text', COLORS[2].value);
   try {
     f.send('pointerdown', 1);
     assert(f.text.blocks.size === 0);
@@ -403,7 +488,16 @@ await test('Text opens only after a tap, never during a pinch or a swipe', () =>
     f.send('pointerdown', 4);
     f.send('pointerup', 4);
     assert(f.text.blocks.size === 1);
+    const block = f.text.blocks.get(f.text.selected);
+    assert(block.data.color === COLORS[2].value, 'Touch creation must use the text color');
     assert(document.activeElement.matches('.text-editor'));
+    block.editor.value = 'Touch color';
+    block.editor.dispatchEvent(new Event('input'));
+    f.text.recolor(COLORS[5].value);
+    f.text.deselect();
+    f.send('pointerdown', 5, 100, 100, block.editor);
+    f.send('pointerup', 5, 100, 100, block.editor);
+    assert(block.data.color === COLORS[5].value, 'Editing existing text must preserve its color');
   } finally { f.cleanup(); }
 });
 

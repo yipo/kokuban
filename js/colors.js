@@ -1,11 +1,12 @@
 import { COLORS, clamp } from './config.js';
 
 export class ColorPicker {
-  constructor(toolbar, toggle, panel) {
+  constructor(toolbar, toggle, panel, onChange = () => {}) {
     this.toolbar = toolbar;
     this.toggle = toggle;
     this.panel = panel;
     this.selected = 0;
+    this.tool = 'pencil';
     this.compact = false;
     this.open = false;
     this.events = new AbortController();
@@ -28,6 +29,7 @@ export class ColorPicker {
       listen(button, 'click', event => {
         this.selected = index;
         this.updateSelection();
+        onChange(this.value);
         this.close(event.detail === 0);
       });
       panel.append(button);
@@ -75,10 +77,24 @@ export class ColorPicker {
 
   get value() { return COLORS[this.selected].value; }
 
+  // Tool/block selection updates the UI without applying a new color.
+  setColor(value, tool = this.tool) {
+    const index = COLORS.findIndex(color => color.value === value);
+    if (index < 0) return;
+    this.selected = index;
+    this.tool = tool;
+    this.updateSelection();
+  }
+
   updateSelection() {
-    this.buttons.forEach((button, index) => button.setAttribute('aria-pressed', index === this.selected));
+    this.buttons.forEach((button, index) => {
+      button.setAttribute('aria-pressed', index === this.selected);
+      button.setAttribute('aria-label', `${COLORS[index].name} ${this.tool} color`);
+    });
+    const name = this.tool === 'text' ? 'Text' : 'Pencil';
+    this.panel.setAttribute('aria-label', `${name} color`);
     this.toggle.querySelector('.color-swatch').style.background = this.value;
-    const label = `Pencil color: ${COLORS[this.selected].name}`;
+    const label = `${name} color: ${COLORS[this.selected].name}`;
     this.toggle.setAttribute('aria-label', label);
     this.toggle.title = label;
   }

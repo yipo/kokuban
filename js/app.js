@@ -14,8 +14,12 @@ const statusElement = document.querySelector('#save-status');
 const toolButtons = [...document.querySelectorAll('[data-tool]')];
 const sizeButtons = [...document.querySelectorAll('[data-size]')];
 const sizes = { pencil: 1, eraser: 1, text: 1 };
-const colorPicker = new ColorPicker(document.querySelector('#sizes'), document.querySelector('#color-toggle'), document.querySelector('#colors'));
+const toolColors = { pencil: '#fff', text: '#fff' };
 let tool = 'pencil';
+const colorPicker = new ColorPicker(document.querySelector('#sizes'), document.querySelector('#color-toggle'), document.querySelector('#colors'), color => {
+  toolColors[tool === 'text' ? 'text' : 'pencil'] = color;
+  if (tool === 'text') textLayer.recolor(color);
+});
 let ready = false;
 let gesture = null;
 let database;
@@ -31,7 +35,11 @@ function status(state, message, detail = '') {
 
 const textLayer = new TextLayer(document.querySelector('#text-layer'), viewport,
   () => saver.schedule(),
-  index => { if (index >= 0) sizes.text = index; updateTools(); },
+  (index, color) => {
+    if (index >= 0) sizes.text = index;
+    toolColors.text = color;
+    updateTools();
+  },
   document.querySelector('#text-actions'));
 
 const saver = new Autosave(async () => {
@@ -48,7 +56,9 @@ const saver = new Autosave(async () => {
 function updateTools() {
   element.dataset.tool = tool;
   toolButtons.forEach(button => button.setAttribute('aria-pressed', button.dataset.tool === tool));
-  document.querySelector('#sizes').setAttribute('aria-label', `${tool} size and pencil color`);
+  const colorTool = tool === 'text' ? 'text' : 'pencil';
+  colorPicker.setColor(toolColors[colorTool], colorTool);
+  document.querySelector('#sizes').setAttribute('aria-label', `${tool} size and ${colorTool} color`);
   sizeButtons.forEach((button, index) => {
     button.setAttribute('aria-pressed', index === sizes[tool]);
     const name = ['Small', 'Medium', 'Large'][index];
@@ -109,7 +119,7 @@ element.addEventListener('pointerdown', event => {
     if (!viewport.contains(point)) return;
     if (tool === 'text') {
       event.preventDefault();
-      textLayer.create(point, SIZES.text[sizes.text]);
+      textLayer.create(point, SIZES.text[sizes.text], toolColors.text);
       return;
     }
     event.preventDefault();

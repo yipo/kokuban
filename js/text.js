@@ -29,14 +29,15 @@ export class TextLayer {
     for (const record of records) this.add({ ...record });
   }
 
-  create(point, size) {
+  create(point, size, color = '#fff') {
     this.commit();
     const id = crypto.randomUUID();
-    this.add({ id, x: point.x, y: point.y, size, text: '' });
+    this.add({ id, x: point.x, y: point.y, size, color, text: '' });
     this.edit(id);
   }
 
   add(data) {
+    data.color ??= '#fff';
     const element = document.createElement('div');
     element.className = 'text-block';
     element.dataset.id = data.id;
@@ -103,6 +104,7 @@ export class TextLayer {
     const width = Math.min(BOARD_SIZE - data.x, Math.max(data.size + 4, Math.ceil(longest) + 6));
     element.style.width = `${width}px`;
     editor.style.fontSize = `${data.size}px`;
+    editor.style.color = data.color;
     editor.style.height = '0px';
     const height = Math.min(BOARD_SIZE, Math.max(lineHeight + 4, editor.scrollHeight));
     editor.style.height = `${height}px`;
@@ -117,7 +119,10 @@ export class TextLayer {
     this.selected = id;
     for (const block of this.blocks.values()) block.element.classList.toggle('selected', block.data.id === id);
     if (this.actions) this.actions.hidden = !id;
-    if (id) this.onSelect(SIZES.text.indexOf(this.blocks.get(id).data.size));
+    if (id) {
+      const { size, color } = this.blocks.get(id).data;
+      this.onSelect(SIZES.text.indexOf(size), color);
+    }
   }
 
   edit(id) {
@@ -179,14 +184,20 @@ export class TextLayer {
   commit() {
     const block = this.blocks.get(this.selected);
     if (!block) return;
-    const wasEditing = !block.editor.readOnly;
     block.editor.readOnly = true;
     if (document.activeElement === block.editor) block.editor.blur();
     if (!block.data.text.trim()) this.removeSelected();
-    else if (wasEditing) this.onChange();
   }
 
   deselect() { this.commit(); this.select(null); }
+
+  recolor(color) {
+    const block = this.blocks.get(this.selected);
+    if (!block || block.data.color === color) return;
+    block.data.color = color;
+    block.editor.style.color = color;
+    this.onChange();
+  }
 
   resize(size) {
     const block = this.blocks.get(this.selected);

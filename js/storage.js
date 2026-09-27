@@ -1,4 +1,4 @@
-import { BOARD_SIZE, SIZES } from './config.js';
+import { BOARD_SIZE, SIZES, COLORS } from './config.js';
 
 export function validateRecord(record) {
   if (!record || record.version !== 1 || !(record.bitmap instanceof Blob) || !Array.isArray(record.texts)) {
@@ -7,6 +7,7 @@ export function validateRecord(record) {
   const ids = new Set();
   for (const text of record.texts) {
     if (!text || typeof text.id !== 'string' || ids.has(text.id) || typeof text.text !== 'string' ||
+        (text.color !== undefined && !COLORS.some(color => color.value === text.color)) ||
         !SIZES.text.includes(text.size) || !Number.isFinite(text.x) || !Number.isFinite(text.y) ||
         text.x < 0 || text.y < 0 || text.x >= BOARD_SIZE || text.y >= BOARD_SIZE) {
       throw new Error('The saved text is invalid.');

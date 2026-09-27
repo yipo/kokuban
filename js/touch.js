@@ -125,7 +125,8 @@ export class TouchInput {
         if (gesture.id) this.text.edit(gesture.id);
         else {
           this.text.deselect();
-          if (this.viewport.contains(point)) this.text.create(point, this.options.tool().size);
+          const { size, color } = this.options.tool();
+          if (this.viewport.contains(point)) this.text.create(point, size, color);
         }
       }
     }

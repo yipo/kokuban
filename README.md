@@ -14,8 +14,8 @@ Open `http://localhost:8000`. Use HTTP rather than opening `index.html` directly
 
 ## Controls
 
-- **Pencil / eraser:** choose a tool on the left and draw with the left mouse button. Choose small, medium, or large on the right. Below the sizes, choose white/black or one of six pencil colors. On short screens the palette becomes a dropdown showing the selected color. Choosing a color keeps the current tool active and applies to subsequent pencil strokes; it does not recolor text. The selection lasts until reload.
-- **Text:** choose the text tool and click the board to type. Click existing text to edit. Enter adds a line; Escape finishes editing. Drag the selected block's handle to move it; select the handle or press Escape, then Delete to remove it.
+- **Pencil / eraser:** choose a tool on the left and draw with the left mouse button. Choose small, medium, or large on the right. Below the sizes, choose white/black or one of six pencil colors. On short screens the palette becomes a dropdown showing the selected color. Choosing a color keeps the current tool active. Pencil and eraser share the pencil color; text remembers its own color. Both selections last until reload and are preserved when clearing the board.
+- **Text:** choose the text tool and click the board to type. Click existing text to edit; the palette shows its color. Choose a color to recolor the whole selected block and set the color for new text. With no block selected, only the new-text color changes. Each block’s color is saved with the board. Enter adds a line; Escape finishes editing. Drag the selected block's handle to move it; select the handle or press Escape, then Delete to remove it.
 - **Zoom:** scroll at the point you want to zoom toward, from whole-board fit to 800%.
 - **Pan:** drag with the right mouse button. A small part of the board always remains visible.
 - **Clear board:** removes drawing and text after confirmation. There is no application undo/redo; normal text-editor shortcuts still work while typing.
@@ -39,7 +39,7 @@ The board is 2048 × 2048 pixels. The initial view shows its centered quarter. T
 
 ## Saving and themes
 
-Drawing is a transparent bitmap with white or colored strokes and antialiased alpha edges. Dark mode displays the original colors on black; light mode applies `filter: invert(1) hue-rotate(180deg)` to the canvas and displays it on white. Palette swatches use the same filter to match the drawing. Erasing removes opacity. Saved pixels never change with the system theme. Zooming in can reveal pixels.
+Drawing is a transparent bitmap with white or colored strokes and antialiased alpha edges. Dark mode displays the original colors on black; light mode applies `filter: invert(1) hue-rotate(180deg)` to the canvas and displays it on white. Text editors and palette swatches use the same filter to match the drawing; text handles and selection outlines keep their normal UI colors. Older saved text defaults to white in dark mode and black in light mode. Erasing removes opacity. Saved pixels never change with the system theme. Zooming in can reveal pixels.
 
 The browser autosaves a transparent PNG and separate editable text blocks in IndexedDB. The status at the top reports saving, saved, or errors. Wait for **Saved locally** before closing the app. There is one board per browser profile and app path; another browser or device has a separate board. Browser data clearing removes the saved board. Multiple tabs are not synchronized; the last save wins.
 
@@ -56,7 +56,7 @@ In desktop Chrome, use **Install app** when available or Chrome's own installati
 ## Code map
 
 - `js/app.js`: application setup, tool state, input routing, and installation.
-- `js/colors.js`: pencil palette, adaptive dropdown, and keyboard navigation.
+- `js/colors.js`: pencil/text palette, adaptive dropdown, and keyboard navigation.
 - `js/drawing.js`: temporary active-stroke smoothing, bitmap drawing/erasing, and PNG handling.
 - `js/viewport.js`: board/screen coordinates, pointer-anchored zoom, and panning bounds.
 - `js/touch.js`: finger tracking, tap recognition, and transitions between drawing and two-finger navigation.
@@ -68,14 +68,14 @@ Only the committed bitmap and text are persisted. Stroke samples exist only duri
 
 ## Verification
 
-With the static server running, open `/tests/` (or `/kokuban/tests/` on a project site). The dependency-free browser checks exercise coordinates, zoom anchoring, panning limits, white/colored/transparent pixels, antialiasing, erasing, color-preserving PNG restoration, adaptive palette behavior, text layout, IndexedDB, and save ordering/errors. Touch checks also cover pinch math, cancellation, third-finger transitions, tap recognition, and excluding provisional edits from saves. They use a temporary database and never modify your board.
+With the static server running, open `/tests/` (or `/kokuban/tests/` on a project site). The dependency-free browser checks exercise coordinates, zoom anchoring, panning limits, white/colored/transparent pixels, antialiasing, erasing, color-preserving PNG restoration, adaptive palette behavior, text colors and legacy record compatibility, text layout, IndexedDB, and save ordering/errors. Touch checks also cover pinch math, cancellation, third-finger transitions, tap recognition, and excluding provisional edits from saves. They use a temporary database and never modify your board.
 
 Manual acceptance checks:
 
 - Draw dots, fast curves, and strokes that leave the board; verify endpoints and clipping at all sizes.
 - Erase across text and confirm text remains. Zoom and resize without losing drawing.
 - Switch the system theme and inspect stroke edges for halos; check that every swatch matches its strokes.
-- Resize between tall and short viewports, including with the color dropdown open. Check its three-column layout, keyboard navigation, selection, Escape, outside dismissal, and placement above the on-screen keyboard. Choosing colors with eraser/text selected must preserve the tool and active text editor.
+- Resize between tall and short viewports, including with the color dropdown open. Check its three-column layout, keyboard navigation, selection, Escape, outside dismissal, and placement above the on-screen keyboard. Choosing colors must preserve the tool, text contents, caret, and active text editor. Verify separate pencil/text colors, selected-block recoloring, new-text defaults, and restored colors after reload.
 - Edit multiline text, move it near board edges, resize it, and check Delete inside and outside editing.
 - Reload after saving; confirm both drawing and text return. Cancel and accept Clear board.
 - Verify a GitHub Pages project path and Chrome installation/standalone launch.

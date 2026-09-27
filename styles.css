@@ -41,8 +41,8 @@ button:focus-visible, #viewport:focus-visible { outline: 2px solid var(--accent)
 #viewport { position: fixed; inset: 0; overflow: hidden; outline: none; touch-action: none; }
 #board { position: absolute; width: 2048px; height: 2048px; transform-origin: 0 0; background: var(--board); box-shadow: 0 0 0 1px var(--line); overflow: hidden; }
 #drawing, #text-layer { position: absolute; inset: 0; width: 2048px; height: 2048px; }
-#drawing, .color-swatch { filter: invert(1) hue-rotate(180deg) saturate(200%); }
-@media (prefers-color-scheme: dark) { #drawing, .color-swatch { filter: none; } }
+#drawing, .color-swatch, .text-editor { filter: invert(1) hue-rotate(180deg) saturate(250%); }
+@media (prefers-color-scheme: dark) { #drawing, .color-swatch, .text-editor { filter: none; } }
 #text-layer { pointer-events: none; color: var(--ink); }
 #viewport[data-tool="pencil"], #viewport[data-tool="eraser"] { cursor: crosshair; }
 #viewport[data-tool="text"] { cursor: text; }
