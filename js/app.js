@@ -82,6 +82,20 @@ function updateAvailability() {
   });
 }
 
+async function updateBoardCount() {
+  const button = document.querySelector('#open-board');
+  const badge = document.querySelector('#board-count');
+  let count = null;
+  try {
+    if (session.database) count = await session.count();
+  } catch { /* An unavailable count must not turn a successful board action into an error. */ }
+  badge.hidden = count === null;
+  badge.textContent = count === null ? '' : String(count);
+  const label = count === null ? 'Open board' : `Open board (${count} saved ${count === 1 ? 'board' : 'boards'})`;
+  button.setAttribute('aria-label', label);
+  button.title = label;
+}
+
 async function transition(action) {
   if (busy) throw new Error('Please wait for the current board operation.');
   busy = true;
@@ -99,6 +113,7 @@ async function transition(action) {
     status('error', 'Board action failed', error.message);
     throw error;
   } finally {
+    await updateBoardCount();
     busy = false;
     updateAvailability();
   }

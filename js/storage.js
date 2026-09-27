@@ -75,6 +75,10 @@ function mutate(database, operation) {
   });
 }
 
+export function countBoards(database, path) {
+  return result(database.transaction('library').objectStore('library').index('path').count(path));
+}
+
 export async function listBoards(database, path) {
   const records = await result(database.transaction('library').objectStore('library').index('path').getAll(path));
   return records.sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id));

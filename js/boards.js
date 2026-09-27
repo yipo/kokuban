@@ -1,6 +1,6 @@
 import { BOARD_SIZE } from './config.js';
 import { toPNG } from './drawing.js';
-import { Autosave, openDatabase, listBoards, readBoard, readActiveBoard, createBoard, writeBoard, rememberBoard, removeBoard } from './storage.js';
+import { Autosave, openDatabase, countBoards, listBoards, readBoard, readActiveBoard, createBoard, writeBoard, rememberBoard, removeBoard } from './storage.js';
 
 export async function blankBoard() {
   const canvas = document.createElement('canvas');
@@ -29,6 +29,7 @@ export class BoardSession {
   }
 
   async connect() { this.database ||= await openDatabase(); }
+  async count() { await this.connect(); return countBoards(this.database, this.path); }
   async list() { await this.connect(); return listBoards(this.database, this.path); }
 
   async flush() {
