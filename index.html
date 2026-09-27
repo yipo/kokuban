@@ -25,11 +25,17 @@
       <div class="top-actions">
         <span id="save-status" role="status" aria-live="polite">Opening board…</span>
         <button id="install" class="quiet-button" hidden>Install app</button>
-        <button id="clear" class="quiet-button" disabled title="Clear drawing and text">Clear board</button>
       </div>
     </header>
 
-    <div id="tools" class="toolbar tools" role="toolbar" aria-label="Drawing tools">
+    <div id="tools" class="toolbar tools" role="toolbar" aria-label="Boards and drawing tools">
+      <button id="new-board" aria-label="New board" title="New board" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H5v18h14V8zM14 3v5h5M8 14h8M12 10v8"/></svg>
+      </button>
+      <button id="open-board" aria-label="Open board" title="Open board" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V4h7l3 3h8v13H3zM3 10h18"/></svg>
+      </button>
+      <span class="toolbar-divider" aria-hidden="true"></span>
       <button data-tool="pencil" aria-label="Pencil" aria-pressed="true" title="Pencil" disabled>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15z"/></svg>
       </button>
@@ -58,6 +64,18 @@
       <button class="quiet-button" data-action="done">Done</button>
       <button class="quiet-button" data-action="delete">Delete text</button>
     </div>
+    <dialog id="board-picker" aria-labelledby="board-picker-title">
+      <h2 id="board-picker-title">Saved boards</h2>
+      <p class="board-picker-hint">Select a board to load or remove.</p>
+      <p class="board-picker-error" role="alert" hidden></p>
+      <div class="board-list" role="radiogroup" aria-label="Saved boards"></div>
+      <div class="board-picker-actions">
+        <button class="quiet-button" data-action="remove" disabled>Remove</button>
+        <span></span>
+        <button class="quiet-button" data-action="close">Close</button>
+        <button class="quiet-button" data-action="load" disabled>Load</button>
+      </div>
+    </dialog>
     <footer class="footer"><span class="mouse-hint">Scroll to zoom <span class="separator">·</span> Right-drag to move</span><span class="touch-hint">One finger to draw <span class="separator">·</span> Two to move &amp; zoom</span><output id="zoom" aria-label="Zoom level">100%</output></footer>
     <noscript>Kokuban needs JavaScript enabled to draw and save your board.</noscript>
   </body>

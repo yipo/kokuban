@@ -2,9 +2,11 @@ import { BOARD_SIZE, SIZES, COLORS } from '../js/config.js';
 import { toBoard, zoomAt, constrain, touchPair, pinchCamera } from '../js/viewport.js';
 import { Drawing, paintStroke, toPNG } from '../js/drawing.js';
 import { TextLayer } from '../js/text.js';
-import { Autosave, openDatabase, readBoard, writeBoard, validateRecord } from '../js/storage.js';
+import { Autosave, openDatabase, readBoard, writeBoard, validateRecord, createBoard, listBoards, readActiveBoard, rememberBoard, removeBoard } from '../js/storage.js';
 import { TouchInput } from '../js/touch.js';
 import { ColorPicker } from '../js/colors.js';
+import { BoardSession, blankBoard } from '../js/boards.js';
+import { BoardPicker, formatCreatedAt } from '../js/board-picker.js';
 
 const results = [];
 const assert = (condition, message = 'Assertion failed') => { if (!condition) throw new Error(message); };
@@ -121,7 +123,7 @@ await test('Every pencil color fills dots and curves, survives PNG, and erases t
   COLORS.forEach((color, index) => {
     const y = 30 + index * 30;
     assert(pixel(copy, 30, y).join() === expected[index], 'PNG changed color');
-    paintStroke(context, [{ x: 30, y }], 20, true, COLORS[6].value);
+    paintStroke(context, [{ x: 30, y }], 20, true, COLORS.at(-1).value);
     assert(pixel(surface, 30, y).join() === '0,0,0,0', 'Color prevented erasing');
   });
   assert(pixel(copy, 0, 0).join() === '0,0,0,0');
@@ -142,7 +144,7 @@ await test('Stroke color remains fixed through rendering, snapshots, and cancell
   assert(pixel(restored, 150, 50)[3] === 0);
   drawing.cancel();
   assert(pixel(surface, 100, 50).join() === red && pixel(surface, 150, 50)[3] === 0);
-  drawing.begin({ x: 100, y: 50 }, 20, true, COLORS[6].value);
+  drawing.begin({ x: 100, y: 50 }, 20, true, COLORS.at(-1).value);
   drawing.cancel();
   assert(pixel(surface, 100, 50).join() === red);
 });
@@ -162,8 +164,8 @@ await test('Color dropdown retains selection, navigates by keyboard, and dismiss
     picker.setColor(COLORS[4].value, 'text');
     assert(picker.value === COLORS[4].value && selections.length === 0);
     assert(panel.getAttribute('aria-label') === 'Text color');
-    assert(picker.buttons[4].getAttribute('aria-label') === 'Cyan text color');
-    assert(toggle.getAttribute('aria-label') === 'Text color: Cyan');
+    assert(picker.buttons[4].getAttribute('aria-label') === `${COLORS[4].name} text color`);
+    assert(toggle.getAttribute('aria-label') === `Text color: ${COLORS[4].name}`);
     picker.buttons[2].click();
     assert(selections.join() === COLORS[2].value);
     picker.setColor(COLORS[2].value, 'pencil');
@@ -294,31 +296,257 @@ await test('Saved text accepts legacy and palette colors and rejects invalid col
   }
 });
 
-await test('IndexedDB round-trips PNG/text and rejects invalid records', async () => {
+await test('IndexedDB round-trips independent boards, immutable creation times, and path isolation', async () => {
   const name = `kokuban-test-${crypto.randomUUID()}`;
   const database = await openDatabase(name);
   try {
     const surface = canvas();
     paintStroke(surface.getContext('2d'), [{ x: 25, y: 25 }], 6);
-    const record = { version: 1, bitmap: await toPNG(surface), texts: [{ id: 'test', x: 40, y: 80, size: 48, text: 'Hello\n世界' }] };
-    await writeBoard(database, '/test/', record);
-    const restored = await readBoard(database, '/test/');
+    const record = { id: 'first', createdAt: 10, version: 1, bitmap: await toPNG(surface), texts: [{ id: 'test', x: 40, y: 80, size: 48, text: 'Hello\n世界' }] };
+    await createBoard(database, '/test/', record);
+    const restored = await readBoard(database, '/test/', record.id);
     assert(restored.texts[0].text === 'Hello\n世界');
-    record.texts[0].color = COLORS[6].value;
-    await writeBoard(database, '/test/', record);
-    const colored = await readBoard(database, '/test/');
-    assert(colored.texts[0].color === COLORS[6].value);
+    record.texts[0].color = COLORS[5].value;
+    await writeBoard(database, '/test/', record.id, { ...record, createdAt: 99 });
+    const colored = await readBoard(database, '/test/', record.id);
+    assert(colored.texts[0].color === COLORS[5].value);
+    assert(colored.createdAt === 10, 'Editing must preserve creation time');
     const copy = canvas();
     await new Drawing(copy).restore(restored.bitmap);
     assert(pixel(copy, 25, 25)[3] === 255);
-    assert(await readBoard(database, '/different-path/') === null);
-    await writeBoard(database, '/invalid/', { version: 99 });
-    let rejected = false;
-    try { await readBoard(database, '/invalid/'); } catch { rejected = true; }
-    assert(rejected, 'Invalid records must reject instead of leaving loading pending');
+    await createBoard(database, '/test/', { ...record, id: 'second', createdAt: 20 });
+    await createBoard(database, '/different-path/', { ...record, createdAt: 30 });
+    assert((await listBoards(database, '/test/')).map(record => record.id).join() === 'second,first');
+    assert(await readBoard(database, '/different-path/', 'second') === null);
+    await rememberBoard(database, '/test/', 'first');
+    assert(await readActiveBoard(database, '/test/') === 'first');
+    assert(await readActiveBoard(database, '/different-path/') === 'first');
   } finally {
     database.close();
     indexedDB.deleteDatabase(name);
+  }
+});
+
+await test('Version 1 migration is lossless, path-scoped, and runs once', async () => {
+  const name = `kokuban-test-${crypto.randomUUID()}`;
+  const record = await blankBoard();
+  delete record.id;
+  delete record.createdAt;
+  record.texts = [{ id: 'legacy', x: 40, y: 80, size: 48, text: 'Legacy', color: COLORS[2].value }];
+  const surface = canvas();
+  paintStroke(surface.getContext('2d'), [{ x: 20, y: 20 }], 8, false, COLORS[3].value);
+  record.bitmap = await toPNG(surface);
+  const before = Date.now();
+  await new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, 1);
+    request.onupgradeneeded = () => {
+      const store = request.result.createObjectStore('boards');
+      store.put(record, '/one/');
+      store.put(record, '/two/');
+    };
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => { request.result.close(); resolve(); };
+  });
+  let database = await openDatabase(name);
+  try {
+    const [migrated] = await listBoards(database, '/one/');
+    assert(migrated.createdAt >= before && migrated.createdAt <= Date.now());
+    assert(JSON.stringify(migrated.texts) === JSON.stringify(record.texts));
+    assert(await migrated.bitmap.text() === await record.bitmap.text());
+    assert(await readActiveBoard(database, '/one/') === migrated.id);
+    assert((await listBoards(database, '/two/'))[0].id !== migrated.id);
+    const legacyCount = await new Promise(resolve => {
+      const request = database.transaction('boards').objectStore('boards').count();
+      request.onsuccess = () => resolve(request.result);
+    });
+    assert(legacyCount === 0);
+    database.close();
+    database = await openDatabase(name);
+    const again = await listBoards(database, '/one/');
+    assert(again.length === 1 && again[0].id === migrated.id && again[0].createdAt === migrated.createdAt);
+  } finally {
+    database.close();
+    indexedDB.deleteDatabase(name);
+  }
+});
+
+await test('Board switching drains delayed saves and reload resumes the last open board', async () => {
+  const name = `kokuban-test-${crypto.randomUUID()}`;
+  const database = await openDatabase(name);
+  let value = '';
+  const bitmap = (await blankBoard()).bitmap;
+  const session = new BoardSession('/session/', {
+    snapshot: async () => {
+      const texts = [{ id: 'text', x: 40, y: 80, size: 48, text: value }];
+      await pause(15);
+      return { version: 1, bitmap, texts };
+    },
+    prepare: async record => record,
+    apply: record => { value = record.texts[0]?.text || ''; },
+    status: () => {},
+  }, database);
+  try {
+    await session.start();
+    const first = session.active.id;
+    value = 'First board';
+    session.saver.schedule(1000);
+    const saving = session.saver.flush();
+    value = 'Latest first board';
+    session.saver.schedule(1000);
+    await session.create();
+    await saving;
+    const second = session.active.id;
+    assert(first !== second && value === '');
+    assert((await readBoard(database, '/session/', first)).texts[0].text === 'Latest first board');
+    value = 'Second board';
+    session.saver.schedule(1000);
+    await session.load(first);
+    assert(value === 'Latest first board');
+    assert((await readBoard(database, '/session/', second)).texts[0].text === 'Second board');
+    await session.start();
+    assert(session.active.id === first, 'Reload must resume the older, last open board');
+    await session.remove(first);
+    assert(session.active.id === second && value === 'Second board');
+    assert(await readActiveBoard(database, '/session/') === second);
+    await session.remove(second);
+    assert(session.active.id !== second && value === '');
+    assert((await session.list()).length === 1, 'Deleting the final board must save a blank replacement');
+    await session.create();
+    const active = session.active.id;
+    const inactive = (await session.list()).find(record => record.id !== active);
+    await session.remove(inactive.id);
+    assert(session.active.id === active, 'Removing an inactive board must not switch');
+  } finally {
+    clearTimeout(session.saver.timer);
+    database.close();
+    indexedDB.deleteDatabase(name);
+  }
+});
+
+await test('Failed saves and invalid destinations preserve the current board and can retry', async () => {
+  const name = `kokuban-test-${crypto.randomUUID()}`;
+  const database = await openDatabase(name);
+  let fail = false;
+  const record = await blankBoard();
+  const session = new BoardSession('/fail/', {
+    snapshot: async () => { if (fail) throw new Error('Quota exceeded'); return record; },
+    prepare: async record => { await new Drawing(canvas()).restore(record.bitmap); },
+    apply: () => {}, status: () => {},
+  }, database);
+  try {
+    await session.start();
+    const first = session.active.id;
+    fail = true;
+    session.saver.schedule(1000);
+    let rejected = false;
+    try { await session.create(); } catch { rejected = true; }
+    assert(rejected && session.active.id === first && session.saver.pending);
+    assert((await session.list()).length === 1);
+    fail = false;
+    await session.create();
+    assert(session.active.id !== first && !session.saver.pending);
+    const current = session.active.id;
+    await createBoard(database, '/fail/', { ...record, id: 'corrupt', bitmap: new Blob(['not an image']) });
+    rejected = false;
+    try { await session.load('corrupt'); } catch { rejected = true; }
+    assert(rejected && session.active.id === current);
+    await session.remove('corrupt');
+    assert(session.active.id === current);
+  } finally {
+    clearTimeout(session.saver.timer);
+    database.close();
+    indexedDB.deleteDatabase(name);
+  }
+});
+
+await test('Removed boards cannot be recreated by delayed writes and deletion is atomic', async () => {
+  const name = `kokuban-test-${crypto.randomUUID()}`;
+  const database = await openDatabase(name);
+  try {
+    const first = await blankBoard();
+    const second = await blankBoard();
+    await createBoard(database, '/delete/', first);
+    await createBoard(database, '/delete/', second);
+    await rememberBoard(database, '/delete/', first.id);
+    let rejected = false;
+    try { await removeBoard(database, '/delete/', first.id, second.id, second); } catch { rejected = true; }
+    assert(rejected, 'Duplicate replacement must abort the entire deletion');
+    assert(await readBoard(database, '/delete/', first.id));
+    assert(await readActiveBoard(database, '/delete/') === first.id);
+    await removeBoard(database, '/delete/', first.id, second.id);
+    rejected = false;
+    try { await writeBoard(database, '/delete/', first.id, first); } catch { rejected = true; }
+    assert(rejected && await readBoard(database, '/delete/', first.id) === null);
+    assert(await readActiveBoard(database, '/delete/') === second.id);
+  } finally {
+    database.close();
+    indexedDB.deleteDatabase(name);
+  }
+});
+
+await test('Board picker sorts, selects, previews wrapped text, reports errors, and closes without loading', async () => {
+  const markup = new DOMParser().parseFromString(await (await fetch('../index.html')).text(), 'text/html');
+  const dialog = markup.querySelector('#board-picker');
+  const opener = document.createElement('button');
+  opener.textContent = 'Open board';
+  document.body.append(opener, dialog);
+  let loaded = null;
+  let removed = null;
+  const first = await blankBoard();
+  first.createdAt = new Date(2026, 8, 28, 1, 2, 3).getTime();
+  first.texts = [{ id: 'preview', x: 1950, y: 20, size: 48, text: 'Long wrapped line\nSecond line', color: COLORS[3].value }];
+  const second = { ...await blankBoard(), createdAt: first.createdAt + 1000 };
+  const records = [first, second];
+  const picker = new BoardPicker(dialog, opener, {
+    load: async id => { loaded = id; await pause(30); throw new Error('Load failed'); },
+    remove: async id => { removed = id; return { records: records.filter(record => record.id !== id), activeId: first.id }; },
+  });
+  try {
+    picker.show(records, first.id);
+    const items = [...dialog.querySelectorAll('[role="radio"]')];
+    assert(items[0].dataset.id === second.id && items[1].getAttribute('aria-checked') === 'true');
+    assert(formatCreatedAt(first.createdAt) === '2026-09-28 01:02:03');
+    assert(items[1].querySelector('time').textContent === '2026-09-28 01:02:03');
+    for (let i = 0; i < 50 && !items[1].querySelector('textarea'); i++) await pause(20);
+    const preview = items[1].querySelector('textarea');
+    assert(preview?.value === first.texts[0].text && preview.readOnly);
+    assert(items[1].querySelector('canvas')?.width === 256);
+    dialog.style.maxHeight = '300px';
+    await pause(20);
+    const bounds = items[1].querySelector('.board-preview').getBoundingClientRect();
+    assert(Math.abs(bounds.width - bounds.height) < 2, 'Short dialogs must scroll, not squash previews');
+    assert(picker.list.scrollHeight > picker.list.clientHeight);
+    dialog.style.maxHeight = '';
+    picker.loadButton.focus();
+    picker.loadButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    assert(document.activeElement === items[1], 'Tab must wrap inside the dialog');
+    items[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+    assert(document.activeElement === picker.loadButton, 'Shift+Tab must wrap inside the dialog');
+    assert(parseFloat(preview.style.height) > 48 * 2.5, 'Text should wrap at the board edge');
+    items[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    assert(picker.selected === second.id && document.activeElement === items[0]);
+    assert(loaded === null, 'Selection must not load a board');
+    picker.loadButton.click();
+    assert(document.activeElement === dialog && picker.closeButton.disabled);
+    const busyTab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    dialog.dispatchEvent(busyTab);
+    const busyEscape = new Event('cancel', { cancelable: true });
+    dialog.dispatchEvent(busyEscape);
+    assert(busyTab.defaultPrevented && busyEscape.defaultPrevented, 'Pending operations must keep focus inside the dialog');
+    await pause(50);
+    assert(loaded === second.id && dialog.open && !picker.error.hidden);
+    picker.removeButton.click();
+    await pause(20);
+    assert(removed === second.id && dialog.querySelectorAll('[role="radio"]').length === 1 && dialog.open);
+    picker.closeButton.click();
+    await pause(20);
+    assert(!dialog.open && document.activeElement === opener);
+    assert(!picker.list.children.length, 'Closing must release previews');
+  } finally {
+    dialog.close();
+    picker.previews.disconnect();
+    dialog.remove();
+    opener.remove();
   }
 });
 

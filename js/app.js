@@ -1,8 +1,9 @@
-import { SIZES } from './config.js';
+import { BOARD_SIZE, SIZES } from './config.js';
 import { Drawing } from './drawing.js';
 import { Viewport } from './viewport.js';
 import { TextLayer } from './text.js';
-import { Autosave, openDatabase, readBoard, writeBoard } from './storage.js';
+import { BoardSession } from './boards.js';
+import { BoardPicker } from './board-picker.js';
 import { TouchInput } from './touch.js';
 import { ColorPicker } from './colors.js';
 
@@ -22,8 +23,7 @@ const colorPicker = new ColorPicker(document.querySelector('#sizes'), document.q
 });
 let ready = false;
 let gesture = null;
-let database;
-let loadFailed = false;
+let busy = false;
 // GitHub Pages projects share an origin, so keep their boards separate by path.
 const boardKey = new URL('./', location.href).pathname;
 
@@ -42,16 +42,72 @@ const textLayer = new TextLayer(document.querySelector('#text-layer'), viewport,
   },
   document.querySelector('#text-actions'));
 
-const saver = new Autosave(async () => {
-  // Capture text and bitmap before the first asynchronous boundary.
-  const texts = textLayer.serialize().filter(text => text.text.trim());
-  const bitmap = await drawing.snapshot();
-  return { version: 1, bitmap, texts };
-}, async record => {
-  if (loadFailed) throw new Error('The saved board could not be opened. Reload to retry, or Clear board to replace it.');
-  database ||= await openDatabase();
-  await writeBoard(database, boardKey, record);
-}, status);
+const session = new BoardSession(boardKey, {
+  snapshot: async () => {
+    // Capture text and bitmap before the first asynchronous boundary.
+    const texts = textLayer.serialize().filter(text => text.text.trim());
+    const bitmap = await drawing.snapshot();
+    return { version: 1, bitmap, texts };
+  },
+  prepare: async record => {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = BOARD_SIZE;
+    await new Drawing(canvas).restore(record.bitmap);
+    return canvas;
+  },
+  apply: (record, prepared) => {
+    drawing.clear();
+    drawing.context.drawImage(prepared, 0, 0);
+    textLayer.clear();
+    textLayer.restore(record.texts);
+    viewport.reset();
+  },
+  status,
+});
+const saver = session.saver;
+const picker = new BoardPicker(document.querySelector('#board-picker'), document.querySelector('#open-board'), {
+  load: id => transition(() => session.load(id)),
+  remove: id => transition(async () => {
+    await session.remove(id);
+    return { records: await session.list(), activeId: session.active?.id };
+  }),
+});
+
+function updateAvailability() {
+  ready = !busy && !!session.active;
+  element.inert = !ready;
+  element.setAttribute('aria-busy', busy);
+  document.querySelectorAll('#tools button, #sizes button, #colors button').forEach(button => {
+    button.disabled = busy || (!session.active && !button.matches('#new-board, #open-board'));
+  });
+}
+
+async function transition(action) {
+  if (busy) throw new Error('Please wait for the current board operation.');
+  busy = true;
+  touch.cancel();
+  textLayer.endDrag(true);
+  finishGesture();
+  textLayer.deselect();
+  colorPicker.close();
+  updateAvailability();
+  try {
+    const result = await action();
+    status('saved', 'Saved locally');
+    return result;
+  } catch (error) {
+    status('error', 'Board action failed', error.message);
+    throw error;
+  } finally {
+    busy = false;
+    updateAvailability();
+  }
+}
+
+// Toolbar failures also need visible detail, not just a hover tooltip.
+function showActionError(error) {
+  status('error', error.message, error.message);
+}
 
 function updateTools() {
   element.dataset.tool = tool;
@@ -85,7 +141,7 @@ sizeButtons.forEach(button => {
 });
 
 const touch = new TouchInput(element, viewport, drawing, textLayer, {
-  available: () => ready && !gesture,
+  available: () => ready && !picker.open && !gesture,
   tool: () => ({ tool, size: SIZES[tool][sizes[tool]], color: colorPicker.value }),
   changed: () => saver.schedule(0),
 });
@@ -160,21 +216,23 @@ element.addEventListener('lostpointercapture', finishGesture);
 window.addEventListener('blur', () => { touch.cancel(); textLayer.endDrag(true); finishGesture(); });
 
 document.addEventListener('keydown', event => {
-  if (!ready || event.isComposing || event.target.matches('textarea, input, [contenteditable]')) return;
+  if (!ready || picker.open || event.isComposing || event.target.matches('textarea, input, [contenteditable]')) return;
   if (event.key === 'Delete' && tool === 'text' && textLayer.selected) {
     event.preventDefault();
     textLayer.removeSelected();
   } else if (event.key === 'Escape') textLayer.deselect();
 });
 
-document.querySelector('#clear').addEventListener('click', () => {
-  if (!window.confirm('Clear all drawing and text? This cannot be undone.')) return;
-  touch.cancel();
-  finishGesture();
-  textLayer.clear();
-  drawing.clear();
-  loadFailed = false;
-  saver.schedule(0);
+document.querySelector('#new-board').addEventListener('click', () => {
+  transition(() => session.create()).catch(showActionError);
+});
+document.querySelector('#open-board').addEventListener('click', () => {
+  transition(async () => {
+    await session.flush();
+    const records = await session.list();
+    picker.selected = session.active?.id || null;
+    picker.show(records, session.active?.id);
+  }).catch(showActionError);
 });
 
 document.addEventListener('visibilitychange', () => {
@@ -211,18 +269,7 @@ window.addEventListener('appinstalled', () => { installPrompt = null; installBut
 
 updateTools();
 try {
-  database = await openDatabase();
-  const record = await readBoard(database, boardKey);
-  if (record) {
-    await drawing.restore(record.bitmap);
-    textLayer.restore(record.texts);
-  }
-  status('saved', 'Saved locally');
+  await transition(() => session.start());
 } catch (error) {
-  loadFailed = true;
-  status('error', 'Storage unavailable', `${error.message} Reload to retry, or Clear board to start a new saved board.`);
-} finally {
-  ready = true;
-  element.setAttribute('aria-busy', 'false');
-  document.querySelectorAll('button:disabled').forEach(button => { button.disabled = false; });
+  status('error', 'Could not open board', `${error.message} Use New board or Open board to retry; existing boards are preserved.`);
 }

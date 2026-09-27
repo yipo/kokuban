@@ -33,9 +33,7 @@ export class Viewport {
     this.output = output;
     this.width = element.clientWidth;
     this.height = element.clientHeight;
-    const scale = Math.min(this.width, this.height) / 1024;
-    this.camera = { scale, x: (this.width - BOARD_SIZE * scale) / 2, y: (this.height - BOARD_SIZE * scale) / 2 };
-    this.render();
+    this.reset();
     element.addEventListener('wheel', event => {
       event.preventDefault();
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? this.height : 1;
@@ -47,6 +45,12 @@ export class Viewport {
   }
 
   minimumScale() { return Math.min(this.width, this.height) / BOARD_SIZE; }
+
+  reset() {
+    const scale = Math.min(this.width, this.height) / 1024;
+    this.camera = { scale, x: (this.width - BOARD_SIZE * scale) / 2, y: (this.height - BOARD_SIZE * scale) / 2 };
+    this.render();
+  }
 
   point(event) {
     const bounds = this.element.getBoundingClientRect();
